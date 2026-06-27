@@ -1,1 +1,1439 @@
+<!doctype html>
+<html lang="hi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SIR Roll Checker — Apna naam draft list mein dhundo</title>
+    <meta
+      name="description"
+      content="Voter list PDF upload karo, browser mein hi scan/search karo — apna naam ya EPIC number turant dhundo, koi data server pe nahi jaata."
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              slate: { DEFAULT: "#1C2B33", light: "#2E4250" },
+              amber: { DEFAULT: "#F0A33D", dark: "#C27F23" },
+              paper: { DEFAULT: "#FAFAF7", dim: "#F0EDE4" },
+              tealc: { DEFAULT: "#1F7A5C", light: "#E5F3EC" },
+              redc: { DEFAULT: "#B3463A", light: "#FAEAE7" },
+            },
+            fontFamily: {
+              sans: ["Inter", "sans-serif"],
+              mono: ["JetBrains Mono", "monospace"],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      :root {
+        --slate: #1c2b33;
+        --slate-light: #2e4250;
+        --amber: #f0a33d;
+        --amber-dark: #c27f23;
+        --paper: #fafaf7;
+        --paper-dim: #f0ede4;
+        --teal: #1f7a5c;
+        --teal-light: #e5f3ec;
+        --red: #b3463a;
+        --red-light: #faeae7;
+        --ink: #2a2f33;
+        --ink-soft: rgba(42, 47, 51, 0.65);
+        --card: #ffffff;
+        --card-border: rgba(28, 43, 51, 0.1);
+      }
+      html.dark {
+        --slate: #0f1922;
+        --slate-light: #1c2b33;
+        --paper: #11181d;
+        --paper-dim: #1a2329;
+        --teal-light: rgba(31, 122, 92, 0.18);
+        --red-light: rgba(179, 70, 58, 0.18);
+        --ink: #e8e6df;
+        --ink-soft: rgba(232, 230, 223, 0.65);
+        --card: #182229;
+        --card-border: rgba(232, 230, 223, 0.1);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        transition: background 0.25s ease;
+      }
+      body {
+        margin: 0;
+        font-family: "Inter", sans-serif;
+        background: var(--paper);
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+        transition:
+          background 0.25s ease,
+          color 0.25s ease;
+      }
+      .mono {
+        font-family: "JetBrains Mono", monospace;
+      }
+      ::selection {
+        background: var(--amber);
+        color: var(--slate);
+      }
+
+      .scanline {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        border-radius: inherit;
+      }
+      .scanline::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -30%;
+        width: 30%;
+        height: 100%;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(240, 163, 61, 0.35),
+          transparent
+        );
+        animation: sweep 1.6s linear infinite;
+      }
+      @keyframes sweep {
+        0% {
+          left: -30%;
+        }
+        100% {
+          left: 100%;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .scanline::after {
+          animation: none;
+          display: none;
+        }
+      }
+
+      .dropzone {
+        transition:
+          border-color 0.2s ease,
+          background 0.2s ease;
+      }
+      .dropzone.drag {
+        border-color: var(--amber);
+        background: rgba(240, 163, 61, 0.06);
+      }
+
+      .progress-track {
+        background: var(--paper-dim);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .progress-fill {
+        background: var(--amber);
+        height: 100%;
+        transition: width 0.25s ease;
+      }
+
+      .hit-row {
+        transition: background 0.15s ease;
+      }
+      .hit-row:hover {
+        background: var(--paper-dim);
+      }
+
+      mark {
+        background: var(--amber);
+        color: var(--slate);
+        padding: 1px 3px;
+        border-radius: 3px;
+        font-weight: 600;
+      }
+
+      .focus-ring:focus-visible {
+        outline: 3px solid var(--amber);
+        outline-offset: 2px;
+      }
+
+      details > summary {
+        list-style: none;
+        cursor: pointer;
+      }
+      details > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: var(--paper);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .fade-in {
+        animation: fadeIn 0.4s ease;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .scrollbar-thin::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      .scrollbar-thin::-webkit-scrollbar-thumb {
+        background: var(--amber);
+        border-radius: 8px;
+      }
+
+      .lang-kn {
+        font-family: "Inter", sans-serif;
+      }
+
+      .tab-btn {
+        color: var(--ink-soft);
+      }
+      .tab-btn[data-active="true"] {
+        background: var(--card);
+        color: var(--slate);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+      }
+
+      .history-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        color: var(--ink-soft);
+        cursor: pointer;
+        transition: border-color 0.15s ease;
+      }
+      .history-chip:hover {
+        border-color: var(--amber);
+      }
+
+      #thumbModal.flex {
+        display: flex;
+      }
+
+      .bulk-row-hit {
+        background: var(--teal-light);
+        border-color: var(--teal);
+      }
+      .bulk-row-miss {
+        background: var(--red-light);
+        border-color: var(--red);
+      }
+
+      .word-highlight {
+        position: absolute;
+        border: 2px solid var(--amber);
+        background: rgba(240, 163, 61, 0.28);
+        border-radius: 3px;
+        pointer-events: none;
+        animation: pulseBox 1.4s ease-in-out infinite;
+      }
+      @keyframes pulseBox {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(240, 163, 61, 0.5);
+        }
+        50% {
+          box-shadow: 0 0 0 6px rgba(240, 163, 61, 0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .word-highlight {
+          animation: none;
+        }
+      }
+      #modalImgWrap {
+        position: relative;
+        display: inline-block;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ============ HEADER ============ -->
+    <header class="bg-[var(--slate)] text-[var(--paper)]">
+      <div
+        class="max-w-5xl mx-auto px-5 sm:px-8 py-5 flex items-center justify-between"
+      >
+        <div class="flex items-center gap-3">
+          <div
+            class="w-9 h-9 rounded-lg bg-[var(--amber)] flex items-center justify-center shrink-0"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--slate)"
+              stroke-width="2.3"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="M21 21l-4.3-4.3" />
+            </svg>
+          </div>
+          <div>
+            <p class="font-semibold leading-tight">SIR Roll Checker</p>
+            <p class="text-xs text-[var(--paper)]/55 leading-tight">
+              Naam dhundo, bina kahin upload kiye
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <span
+            class="hidden sm:inline-flex items-center gap-1.5 text-xs font-medium text-[var(--paper)]/70 mono"
+          >
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--teal)]"></span>
+            100% browser-only
+          </span>
+          <button
+            id="darkToggle"
+            class="focus-ring w-9 h-9 rounded-lg border border-[var(--paper)]/15 hover:border-[var(--paper)]/30 flex items-center justify-center transition-colors"
+            aria-label="Dark mode toggle karo"
+          >
+            <svg
+              id="iconSun"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+              />
+            </svg>
+            <svg
+              id="iconMoon"
+              class="hidden"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+            >
+              <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-5 sm:px-8 py-10 sm:py-14">
+      <!-- ============ INTRO ============ -->
+      <section class="mb-10 max-w-2xl">
+        <h1
+          class="text-2xl sm:text-[2rem] font-bold leading-tight text-[var(--slate)]"
+        >
+          Apna naam draft/final voter roll PDF mein, 200 page palatne ki
+          zaroorat nahi.
+        </h1>
+        <p class="mt-3 text-[var(--ink-soft)] leading-relaxed">
+          Apna SIR/voter list PDF yahan daalo — naam ya EPIC number type karke
+          turant dhundo. PDF text-based ho to seconds mein result milega;
+          scanned/image PDF ho to browser mein hi OCR (scanning) hoga, jisme
+          thoda time lagega.
+        </p>
+        <div class="mt-4 flex flex-wrap gap-2 text-xs font-medium">
+          <span
+            class="inline-flex items-center gap-1.5 bg-[var(--teal-light)] text-[var(--teal)] px-3 py-1.5 rounded-full"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+            >
+              <rect x="5" y="11" width="14" height="9" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+            Koi data upload nahi hota — sab kuch tumhare device pe
+          </span>
+          <span
+            class="inline-flex items-center gap-1.5 bg-[var(--paper-dim)] text-[var(--slate)] px-3 py-1.5 rounded-full"
+          >
+            Hindi · Kannada · English
+          </span>
+        </div>
+      </section>
+
+      <!-- ============ HISTORY ============ -->
+      <section id="historySection" class="hidden mb-8">
+        <div class="flex items-center justify-between mb-3">
+          <p
+            class="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]"
+          >
+            Is session mein process kiye gaye PDFs
+          </p>
+          <button
+            id="clearHistoryBtn"
+            class="text-xs text-[var(--ink-soft)] hover:text-[var(--red)] focus-ring rounded"
+          >
+            Clear karo
+          </button>
+        </div>
+        <div id="historyList" class="flex flex-wrap gap-2"></div>
+      </section>
+
+      <!-- ============ UPLOAD ZONE ============ -->
+      <section id="uploadSection" class="mb-10">
+        <div
+          id="dropzone"
+          class="dropzone border-2 border-dashed border-[var(--slate)]/20 rounded-2xl bg-[var(--card)] px-6 py-12 sm:py-16 text-center cursor-pointer focus-ring"
+          tabindex="0"
+          role="button"
+          aria-label="PDF upload karne ke liye click karo ya drag-drop karo"
+        >
+          <input
+            type="file"
+            id="fileInput"
+            accept="application/pdf"
+            class="hidden"
+          />
+          <svg
+            class="mx-auto mb-4"
+            width="40"
+            height="40"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--slate)"
+            stroke-width="1.6"
+            opacity="0.55"
+          >
+            <path
+              d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+            />
+            <path d="M14 2v6h6" />
+          </svg>
+          <p class="font-semibold text-[var(--slate)]">
+            Voter list PDF yahan drop karo
+          </p>
+          <p class="text-sm text-[var(--ink-soft)] mt-1">
+            ya click karke select karo · CEO Karnataka / voters.eci.gov.in se
+            download kiya hua PDF
+          </p>
+        </div>
+      </section>
+
+      <!-- ============ PROCESSING ============ -->
+      <section id="processSection" class="hidden mb-10">
+        <div
+          class="bg-[var(--slate)] text-[var(--paper)] rounded-2xl p-6 sm:p-7 relative overflow-hidden"
+        >
+          <div class="scanline" id="scanlineEl"></div>
+          <div class="relative">
+            <div class="flex items-center justify-between gap-4 mb-4">
+              <div class="flex items-center gap-3">
+                <div class="spinner" id="spinnerEl"></div>
+                <p class="font-semibold" id="statusText">
+                  PDF padha jaa raha hai…
+                </p>
+              </div>
+              <span
+                class="mono text-sm text-[var(--paper)]/70"
+                id="pageCounter"
+              ></span>
+            </div>
+            <div class="progress-track h-2">
+              <div
+                class="progress-fill"
+                id="progressFill"
+                style="width: 0%"
+              ></div>
+            </div>
+            <p class="text-xs text-[var(--paper)]/55 mt-3" id="subStatusText">
+              Shuru ho raha hai…
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ SEARCH + RESULTS ============ -->
+      <section id="searchSection" class="hidden">
+        <!-- Tabs -->
+        <div class="flex gap-1 mb-6 bg-[var(--paper-dim)] p-1 rounded-xl w-fit">
+          <button
+            id="tabSingle"
+            class="tab-btn focus-ring px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+            data-active="true"
+          >
+            Ek-ek search
+          </button>
+          <button
+            id="tabBulk"
+            class="tab-btn focus-ring px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+            data-active="false"
+          >
+            Bulk EPIC check
+          </button>
+        </div>
+
+        <!-- Single search panel -->
+        <div id="singlePanel">
+          <div class="flex flex-col sm:flex-row gap-3 mb-3">
+            <div class="relative flex-1">
+              <svg
+                class="absolute left-4 top-1/2 -translate-y-1/2"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--ink-soft)"
+                stroke-width="2.2"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <path d="M21 21l-4.3-4.3" />
+              </svg>
+              <input
+                id="searchInput"
+                type="text"
+                placeholder="Naam, EPIC number, ya serial number type karo…"
+                class="focus-ring w-full pl-12 pr-4 py-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] text-[var(--ink)] placeholder:text-[var(--ink-soft)]/60 outline-none"
+              />
+            </div>
+            <button
+              id="rescanBtn"
+              class="focus-ring shrink-0 inline-flex items-center justify-center gap-2 border-2 border-[var(--card-border)] hover:border-[var(--slate)]/30 text-[var(--slate)] font-semibold px-5 py-3.5 rounded-xl text-sm transition-colors"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.3"
+              >
+                <path
+                  d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                />
+                <path d="M14 2v6h6" />
+              </svg>
+              Nayi PDF
+            </button>
+          </div>
+
+          <label
+            class="inline-flex items-center gap-2 mb-5 cursor-pointer select-none"
+          >
+            <input
+              type="checkbox"
+              id="fuzzyToggle"
+              checked
+              class="w-4 h-4 accent-[var(--amber)]"
+            />
+            <span class="text-sm text-[var(--ink-soft)]"
+              >Fuzzy match (OCR spelling galtiyan bhi pakdo)</span
+            >
+          </label>
+
+          <p
+            class="text-sm text-[var(--ink-soft)] mb-4 mono"
+            id="resultMeta"
+          ></p>
+
+          <div
+            id="resultsList"
+            class="space-y-2 max-h-[480px] overflow-y-auto scrollbar-thin pr-1"
+          ></div>
+
+          <div
+            id="emptyState"
+            class="hidden text-center py-14 px-6 bg-[var(--card)] rounded-2xl border border-[var(--card-border)]"
+          >
+            <svg
+              class="mx-auto mb-3"
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--ink-soft)"
+              stroke-width="1.8"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="M21 21l-4.3-4.3" />
+            </svg>
+            <p class="font-semibold text-[var(--slate)]">Koi match nahi mila</p>
+            <p class="text-sm text-[var(--ink-soft)] mt-1">
+              Fuzzy match try karo, ya sirf surname/EPIC se search karo.
+            </p>
+          </div>
+
+          <div
+            id="idleState"
+            class="text-center py-14 px-6 bg-[var(--card)] rounded-2xl border border-[var(--card-border)]"
+          >
+            <p class="text-sm text-[var(--ink-soft)]">
+              Search karne ke liye upar type karo — page load hote hi yahan
+              results aane lagenge.
+            </p>
+          </div>
+        </div>
+
+        <!-- Bulk EPIC panel -->
+        <div id="bulkPanel" class="hidden">
+          <p class="text-sm text-[var(--ink-soft)] mb-3">
+            Ek line mein ek EPIC number ya naam daalo — sabka result ek saath
+            table mein milega.
+          </p>
+          <textarea
+            id="bulkInput"
+            rows="6"
+            placeholder="KA1234567&#10;KA9876543&#10;Suresh Patil&#10;…"
+            class="focus-ring w-full p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] text-[var(--ink)] mono text-sm placeholder:text-[var(--ink-soft)]/50 outline-none resize-y"
+          ></textarea>
+          <div class="flex items-center gap-3 mt-3 mb-6">
+            <button
+              id="bulkRunBtn"
+              class="focus-ring inline-flex items-center gap-2 bg-[var(--slate)] hover:bg-[var(--slate-light)] text-[var(--paper)] font-semibold px-5 py-3 rounded-xl text-sm transition-colors"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.3"
+              >
+                <path d="M9 11l3 3L22 4" />
+                <path
+                  d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
+                />
+              </svg>
+              Sabko check karo
+            </button>
+            <span
+              class="text-xs text-[var(--ink-soft)] mono"
+              id="bulkCount"
+            ></span>
+          </div>
+          <div id="bulkResults" class="space-y-2"></div>
+        </div>
+      </section>
+
+      <!-- ============ THUMBNAIL MODAL ============ -->
+      <div
+        id="thumbModal"
+        class="hidden fixed inset-0 z-50 items-center justify-center p-5"
+        style="background: rgba(0, 0, 0, 0.6)"
+      >
+        <div
+          class="bg-[var(--card)] rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col"
+        >
+          <div
+            class="flex items-center justify-between px-5 py-4 border-b border-[var(--card-border)]"
+          >
+            <p class="font-semibold text-[var(--slate)]" id="modalTitle">
+              Page preview
+            </p>
+            <button
+              id="modalClose"
+              class="focus-ring w-8 h-8 rounded-lg hover:bg-[var(--paper-dim)] flex items-center justify-center"
+              aria-label="Close"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+              >
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div
+            class="overflow-auto p-4 flex-1 flex items-center justify-center bg-[var(--paper-dim)]"
+          >
+            <div id="modalImgWrap">
+              <img
+                id="modalImg"
+                class="max-w-full rounded-lg shadow-lg block"
+                alt="Page preview"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ HOW IT WORKS ============ -->
+      <section class="mt-16 pt-10 border-t border-[var(--card-border)]">
+        <details class="group">
+          <summary
+            class="flex items-center justify-between focus-ring rounded-lg py-2"
+          >
+            <span class="font-semibold text-[var(--slate)]"
+              >Ye kaam kaise karta hai, aur data kahan jaata hai?</span
+            >
+            <svg
+              class="shrink-0 transition-transform group-open:rotate-180"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--slate)"
+              stroke-width="2.2"
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </summary>
+          <div
+            class="mt-4 grid sm:grid-cols-3 gap-4 text-sm text-[var(--ink-soft)] leading-relaxed"
+          >
+            <div
+              class="bg-[var(--card)] rounded-xl p-5 border border-[var(--card-border)]"
+            >
+              <p class="font-semibold text-[var(--slate)] mb-1.5">
+                1. Sab kuch local hai
+              </p>
+              <p>
+                PDF tumhare browser mein hi khulta hai aur process hota hai. Koi
+                file kisi server pe upload nahi hoti.
+              </p>
+            </div>
+            <div
+              class="bg-[var(--card)] rounded-xl p-5 border border-[var(--card-border)]"
+            >
+              <p class="font-semibold text-[var(--slate)] mb-1.5">
+                2. Text ya scan, dono chalega
+              </p>
+              <p>
+                Agar PDF mein text already selectable hai, seconds mein ready ho
+                jaata hai. Scanned/image PDF ho to OCR (Kannada+English) thoda
+                time lega — page count ke hisaab se.
+              </p>
+            </div>
+            <div
+              class="bg-[var(--card)] rounded-xl p-5 border border-[var(--card-border)]"
+            >
+              <p class="font-semibold text-[var(--slate)] mb-1.5">
+                3. Result sirf ek starting point hai
+              </p>
+              <p>
+                Ye tool sirf khojne mein madad karta hai. Final confirmation ke
+                liye hamesha
+                <a
+                  href="https://voters.eci.gov.in"
+                  target="_blank"
+                  rel="noopener"
+                  class="text-[var(--teal)] underline"
+                  >voters.eci.gov.in</a
+                >
+                pe official status check karo.
+              </p>
+            </div>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <footer
+      class="bg-[var(--slate)] text-[var(--paper)]/55 text-xs text-center py-6 px-5"
+    >
+      Ye ek independent jaagrukta tool hai, sarkari portal nahi. OCR results
+      100% accurate nahi hote — humesha official source se confirm karo.
+    </footer>
+
+    <script>
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+      // ---------- Dark mode ----------
+      const darkToggle = document.getElementById("darkToggle");
+      const iconSun = document.getElementById("iconSun");
+      const iconMoon = document.getElementById("iconMoon");
+      function applyTheme(dark) {
+        document.documentElement.classList.toggle("dark", dark);
+        iconSun.classList.toggle("hidden", dark);
+        iconMoon.classList.toggle("hidden", !dark);
+      }
+      const prefersDark = window.matchMedia(
+        "(prefers-color-scheme: dark)",
+      ).matches;
+      applyTheme(prefersDark);
+      darkToggle.addEventListener("click", () => {
+        applyTheme(!document.documentElement.classList.contains("dark"));
+      });
+
+      // ---------- Element refs ----------
+      const dropzone = document.getElementById("dropzone");
+      const fileInput = document.getElementById("fileInput");
+      const uploadSection = document.getElementById("uploadSection");
+      const processSection = document.getElementById("processSection");
+      const searchSection = document.getElementById("searchSection");
+      const statusText = document.getElementById("statusText");
+      const subStatusText = document.getElementById("subStatusText");
+      const progressFill = document.getElementById("progressFill");
+      const pageCounter = document.getElementById("pageCounter");
+      const spinnerEl = document.getElementById("spinnerEl");
+      const scanlineEl = document.getElementById("scanlineEl");
+      const searchInput = document.getElementById("searchInput");
+      const resultsList = document.getElementById("resultsList");
+      const resultMeta = document.getElementById("resultMeta");
+      const emptyState = document.getElementById("emptyState");
+      const idleState = document.getElementById("idleState");
+      const rescanBtn = document.getElementById("rescanBtn");
+      const fuzzyToggle = document.getElementById("fuzzyToggle");
+
+      const tabSingle = document.getElementById("tabSingle");
+      const tabBulk = document.getElementById("tabBulk");
+      const singlePanel = document.getElementById("singlePanel");
+      const bulkPanel = document.getElementById("bulkPanel");
+      const bulkInput = document.getElementById("bulkInput");
+      const bulkRunBtn = document.getElementById("bulkRunBtn");
+      const bulkResults = document.getElementById("bulkResults");
+      const bulkCount = document.getElementById("bulkCount");
+
+      const historySection = document.getElementById("historySection");
+      const historyList = document.getElementById("historyList");
+      const clearHistoryBtn = document.getElementById("clearHistoryBtn");
+
+      const thumbModal = document.getElementById("thumbModal");
+      const modalImg = document.getElementById("modalImg");
+      const modalTitle = document.getElementById("modalTitle");
+      const modalClose = document.getElementById("modalClose");
+
+      // pageRecords: array of { page, text, thumb (dataURL or null) }
+      let pageRecords = [];
+      // sessionHistory: array of { name, pageCount, records }
+      let sessionHistory = [];
+
+      // ---------- Tabs ----------
+      function setTab(which) {
+        const single = which === "single";
+        tabSingle.dataset.active = single ? "true" : "false";
+        tabBulk.dataset.active = single ? "false" : "true";
+        singlePanel.classList.toggle("hidden", !single);
+        bulkPanel.classList.toggle("hidden", single);
+      }
+      tabSingle.addEventListener("click", () => setTab("single"));
+      tabBulk.addEventListener("click", () => setTab("bulk"));
+
+      // ---------- Upload handling ----------
+      dropzone.addEventListener("click", () => fileInput.click());
+      dropzone.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          fileInput.click();
+        }
+      });
+      ["dragenter", "dragover"].forEach((evt) =>
+        dropzone.addEventListener(evt, (e) => {
+          e.preventDefault();
+          dropzone.classList.add("drag");
+        }),
+      );
+      ["dragleave", "drop"].forEach((evt) =>
+        dropzone.addEventListener(evt, (e) => {
+          e.preventDefault();
+          dropzone.classList.remove("drag");
+        }),
+      );
+      dropzone.addEventListener("drop", (e) => {
+        const file = e.dataTransfer.files[0];
+        if (file && file.type === "application/pdf") handleFile(file);
+      });
+      fileInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) handleFile(file);
+      });
+
+      rescanBtn.addEventListener("click", () => {
+        pageRecords = [];
+        searchInput.value = "";
+        bulkInput.value = "";
+        bulkResults.innerHTML = "";
+        searchSection.classList.add("hidden");
+        uploadSection.classList.remove("hidden");
+        fileInput.value = "";
+        setTab("single");
+      });
+
+      async function handleFile(file, fromHistory) {
+        uploadSection.classList.add("hidden");
+        processSection.classList.remove("hidden");
+        searchSection.classList.add("hidden");
+        spinnerEl.style.display = "none";
+        scanlineEl.style.display = "block";
+
+        if (fromHistory) {
+          pageRecords = fromHistory.records;
+          finishProcessing(fromHistory.pageCount, fromHistory.name, true);
+          return;
+        }
+
+        pageRecords = [];
+
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          statusText.textContent = "PDF khola jaa raha hai…";
+          subStatusText.textContent = "Pages count ki jaa rahi hain";
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          const totalPages = pdf.numPages;
+          pageCounter.textContent = `0 / ${totalPages} pages`;
+
+          let hasText = false;
+          const sampleCount = Math.min(3, totalPages);
+          for (let i = 1; i <= sampleCount; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            const text = content.items
+              .map((it) => it.str)
+              .join(" ")
+              .trim();
+            if (text.length > 20) {
+              hasText = true;
+              break;
+            }
+          }
+
+          if (hasText) {
+            statusText.textContent =
+              "Text-based PDF mil gaya — fast extraction ho raha hai";
+            subStatusText.textContent =
+              "OCR ki zaroorat nahi, seedha text padha jaa raha hai";
+            for (let i = 1; i <= totalPages; i++) {
+              const page = await pdf.getPage(i);
+              const content = await page.getTextContent();
+              const viewport = page.getViewport({ scale: 1.3 });
+
+              // Build word list with pixel-space boxes (viewport space = canvas space at this scale)
+              const words = [];
+              let textParts = [];
+              content.items.forEach((item) => {
+                if (!item.str || !item.str.trim()) {
+                  textParts.push(item.str);
+                  return;
+                }
+                // item.transform: [scaleX, skewX, skewY, scaleY, translateX, translateY] in PDF space
+                const tx = pdfjsLib.Util.transform(
+                  viewport.transform,
+                  item.transform,
+                );
+                const fontHeight = Math.hypot(tx[2], tx[3]);
+                const x = tx[4];
+                const yTop = tx[5] - fontHeight;
+                const w = item.width * viewport.scale;
+                const h = fontHeight * 1.15;
+                // split item.str into individual words, distributing width proportionally
+                const wordsInItem = item.str
+                  .split(/(\s+)/)
+                  .filter((s) => s.length);
+                let cursor = x;
+                const totalChars = item.str.length || 1;
+                wordsInItem.forEach((tok) => {
+                  const tokW = (tok.length / totalChars) * w;
+                  if (tok.trim()) {
+                    words.push({
+                      text: tok,
+                      x: cursor,
+                      y: yTop,
+                      w: tokW,
+                      h: h,
+                    });
+                  }
+                  cursor += tokW;
+                });
+                textParts.push(item.str);
+              });
+              const text = textParts.join(" ");
+
+              const canvas = document.createElement("canvas");
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              const ctx = canvas.getContext("2d");
+              await page.render({ canvasContext: ctx, viewport }).promise;
+              pageRecords.push({
+                page: i,
+                text,
+                thumb: canvas.toDataURL("image/jpeg", 0.7),
+                words,
+                imgW: canvas.width,
+                imgH: canvas.height,
+              });
+              updateProgress(i, totalPages, `${i} / ${totalPages} pages`);
+            }
+          } else {
+            statusText.textContent =
+              "Scanned PDF mil gaya — OCR shuru ho raha hai";
+            subStatusText.textContent =
+              "Isme thoda time lagega, page ke hisaab se";
+            spinnerEl.style.display = "block";
+
+            const worker = await Tesseract.createWorker("eng+kan", 1, {
+              logger: (m) => {
+                if (m.status === "recognizing text") {
+                  const pct = Math.round(m.progress * 100);
+                  subStatusText.textContent = `OCR scan ho raha hai… ${pct}%`;
+                }
+              },
+            });
+
+            for (let i = 1; i <= totalPages; i++) {
+              const page = await pdf.getPage(i);
+              const viewport = page.getViewport({ scale: 2.0 });
+              const canvas = document.createElement("canvas");
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              const ctx = canvas.getContext("2d");
+              await page.render({ canvasContext: ctx, viewport }).promise;
+
+              const { data } = await worker.recognize(canvas);
+              const words = (data.words || [])
+                .filter((w) => w.text && w.text.trim())
+                .map((w) => ({
+                  text: w.text,
+                  x: w.bbox.x0,
+                  y: w.bbox.y0,
+                  w: w.bbox.x1 - w.bbox.x0,
+                  h: w.bbox.y1 - w.bbox.y0,
+                }));
+              pageRecords.push({
+                page: i,
+                text: data.text,
+                thumb: canvas.toDataURL("image/jpeg", 0.7),
+                words,
+                imgW: canvas.width,
+                imgH: canvas.height,
+              });
+              updateProgress(i, totalPages, `${i} / ${totalPages} pages`);
+            }
+            await worker.terminate();
+          }
+
+          // save to session history (capped at 6 most recent)
+          sessionHistory.unshift({
+            name: file.name,
+            pageCount: totalPages,
+            records: pageRecords.slice(),
+          });
+          if (sessionHistory.length > 6) sessionHistory.pop();
+          renderHistory();
+
+          finishProcessing(totalPages, file.name, false);
+        } catch (err) {
+          statusText.textContent = "Kuch galat ho gaya";
+          subStatusText.textContent =
+            "PDF padhne mein error aaya — file corrupt ho sakti hai ya format support nahi karta. (" +
+            (err.message || err) +
+            ")";
+          spinnerEl.style.display = "none";
+          scanlineEl.style.display = "none";
+        }
+      }
+
+      function finishProcessing(totalPages, name, skipMeta) {
+        processSection.classList.add("hidden");
+        searchSection.classList.remove("hidden");
+        idleState.classList.remove("hidden");
+        emptyState.classList.add("hidden");
+        resultsList.innerHTML = "";
+        resultMeta.textContent = `${totalPages} pages process ho gaye (${name}) · ab search karo`;
+        searchInput.value = "";
+        searchInput.focus();
+      }
+
+      function updateProgress(done, total, label) {
+        const pct = Math.round((done / total) * 100);
+        progressFill.style.width = pct + "%";
+        pageCounter.textContent = label;
+      }
+
+      // ---------- History ----------
+      function renderHistory() {
+        if (sessionHistory.length === 0) {
+          historySection.classList.add("hidden");
+          return;
+        }
+        historySection.classList.remove("hidden");
+        historyList.innerHTML = "";
+        sessionHistory.forEach((item, idx) => {
+          const chip = document.createElement("button");
+          chip.className = "history-chip focus-ring";
+          chip.innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        <span>${item.name}</span>
+        <span class="opacity-60">· ${item.pageCount}p</span>
+      `;
+          chip.addEventListener("click", () => handleFile(null, item));
+          historyList.appendChild(chip);
+        });
+      }
+      clearHistoryBtn.addEventListener("click", () => {
+        sessionHistory = [];
+        renderHistory();
+      });
+
+      // ---------- Fuzzy matching (Levenshtein-based) ----------
+      function levenshtein(a, b) {
+        const m = a.length,
+          n = b.length;
+        if (m === 0) return n;
+        if (n === 0) return m;
+        const dp = Array.from({ length: m + 1 }, () =>
+          new Array(n + 1).fill(0),
+        );
+        for (let i = 0; i <= m; i++) dp[i][0] = i;
+        for (let j = 0; j <= n; j++) dp[0][j] = j;
+        for (let i = 1; i <= m; i++) {
+          for (let j = 1; j <= n; j++) {
+            if (a[i - 1] === b[j - 1]) dp[i][j] = dp[i - 1][j - 1];
+            else
+              dp[i][j] =
+                1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+          }
+        }
+        return dp[m][n];
+      }
+
+      // Slide a window of query.length (+/-2) across the page text and find best fuzzy match position
+      function fuzzyFindInText(text, query) {
+        const q = query.toLowerCase();
+        const t = text.toLowerCase();
+        if (t.includes(q))
+          return { found: true, index: t.indexOf(q), distance: 0 };
+
+        const qLen = q.length;
+        if (qLen < 3) return { found: false };
+
+        const maxAllowedDist = Math.max(1, Math.floor(qLen * 0.34));
+        let best = { found: false, distance: Infinity, index: -1 };
+
+        const step = Math.max(1, Math.floor(qLen / 3));
+        for (
+          let start = 0;
+          start <= t.length - qLen + 2 && start < t.length;
+          start += step
+        ) {
+          for (let lenDelta = -2; lenDelta <= 2; lenDelta++) {
+            const winLen = qLen + lenDelta;
+            if (winLen < 2) continue;
+            const window = t.substr(start, winLen);
+            if (!window) continue;
+            const dist = levenshtein(window, q);
+            if (dist < best.distance) {
+              best = {
+                found: dist <= maxAllowedDist,
+                distance: dist,
+                index: start,
+              };
+            }
+          }
+        }
+        return best;
+      }
+
+      function escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }
+
+      function highlightExact(text, query, atIndex) {
+        const idx =
+          atIndex !== undefined ? atIndex : (
+            text.toLowerCase().indexOf(query.toLowerCase())
+          );
+        if (idx === -1) return text.slice(0, 140);
+        const start = Math.max(0, idx - 50);
+        const end = Math.min(text.length, idx + query.length + 90);
+        let snippet = text.slice(start, end);
+        const re = new RegExp(escapeRegex(query), "ig");
+        snippet = snippet.replace(re, (m) => `<mark>${m}</mark>`);
+        return (
+          (start > 0 ? "…" : "") + snippet + (end < text.length ? "…" : "")
+        );
+      }
+
+      function highlightFuzzy(text, atIndex, winLen) {
+        const start = Math.max(0, atIndex - 50);
+        const end = Math.min(text.length, atIndex + winLen + 90);
+        const before = text.slice(start, atIndex);
+        const matchPart = text.slice(atIndex, atIndex + winLen);
+        const after = text.slice(atIndex + winLen, end);
+        return (
+          (start > 0 ? "…" : "") +
+          before +
+          `<mark>${matchPart}</mark>` +
+          after +
+          (end < text.length ? "…" : "")
+        );
+      }
+
+      // Find word boxes on a page that match the query (exact substring or fuzzy-close)
+      function findMatchingWordBoxes(rec, query) {
+        if (!rec.words || !rec.words.length) return [];
+        const q = query.toLowerCase();
+        const qLen = q.length;
+        const maxAllowedDist = Math.max(1, Math.floor(qLen * 0.34));
+        const boxes = [];
+
+        // Try matching against individual words and short multi-word runs (for multi-word queries like full names)
+        const qTokens = q.split(/\s+/).filter(Boolean);
+
+        if (qTokens.length === 1) {
+          rec.words.forEach((w) => {
+            const wt = w.text.toLowerCase();
+            if (wt.includes(q) || q.includes(wt)) {
+              boxes.push(w);
+            } else if (qLen >= 3) {
+              const dist = levenshtein(wt, q);
+              if (dist <= maxAllowedDist) boxes.push(w);
+            }
+          });
+        } else {
+          // multi-word query: look for consecutive word runs whose joined text is close to the query
+          for (let i = 0; i < rec.words.length; i++) {
+            let joined = "";
+            let runWords = [];
+            for (
+              let j = i;
+              j < Math.min(i + qTokens.length + 1, rec.words.length);
+              j++
+            ) {
+              runWords.push(rec.words[j]);
+              joined = runWords
+                .map((w) => w.text)
+                .join(" ")
+                .toLowerCase();
+              if (
+                joined.includes(q) ||
+                levenshtein(joined, q) <= Math.max(2, Math.floor(qLen * 0.34))
+              ) {
+                boxes.push(...runWords);
+                break;
+              }
+            }
+          }
+        }
+        return boxes;
+      }
+
+      // ---------- Single search ----------
+      function runSearch() {
+        const q = searchInput.value.trim();
+        const useFuzzy = fuzzyToggle.checked;
+        resultsList.innerHTML = "";
+        if (!q) {
+          emptyState.classList.add("hidden");
+          idleState.classList.remove("hidden");
+          resultMeta.textContent = `${pageRecords.length} pages ready · search karo`;
+          return;
+        }
+        idleState.classList.add("hidden");
+
+        const matches = [];
+        pageRecords.forEach((rec) => {
+          const exactIdx = rec.text.toLowerCase().indexOf(q.toLowerCase());
+          if (exactIdx !== -1) {
+            matches.push({
+              rec,
+              exact: true,
+              index: exactIdx,
+              winLen: q.length,
+            });
+          } else if (useFuzzy) {
+            const fz = fuzzyFindInText(rec.text, q);
+            if (fz.found) {
+              matches.push({
+                rec,
+                exact: false,
+                index: fz.index,
+                winLen: q.length,
+                distance: fz.distance,
+              });
+            }
+          }
+        });
+
+        if (matches.length === 0) {
+          emptyState.classList.remove("hidden");
+          resultMeta.textContent = `"${q}" ke liye koi match nahi`;
+          return;
+        }
+        emptyState.classList.add("hidden");
+        const fuzzyCount = matches.filter((m) => !m.exact).length;
+        resultMeta.textContent =
+          `${matches.length} page${matches.length > 1 ? "s" : ""} mein "${q}" mila` +
+          (fuzzyCount ? ` (${fuzzyCount} fuzzy match)` : "");
+
+        matches.forEach((m) => {
+          const row = document.createElement("div");
+          row.className =
+            "hit-row fade-in bg-[var(--card)] rounded-xl p-4 border border-[var(--card-border)] flex gap-4 items-start";
+          const snippet =
+            m.exact ?
+              highlightExact(m.rec.text, q, m.index)
+            : highlightFuzzy(m.rec.text, m.index, m.winLen);
+          const badge =
+            m.exact ?
+              `<div class="shrink-0 mono text-xs font-semibold bg-[var(--teal-light)] text-[var(--teal)] px-2.5 py-1 rounded-md mt-0.5">Page ${m.rec.page}</div>`
+            : `<div class="shrink-0 mono text-xs font-semibold bg-[var(--amber)]/20 text-[var(--amber-dark)] px-2.5 py-1 rounded-md mt-0.5">Page ${m.rec.page} · fuzzy</div>`;
+          row.innerHTML = `
+        ${badge}
+        <p class="text-sm text-[var(--ink)] leading-relaxed flex-1">${snippet}</p>
+        ${
+          m.rec.thumb ?
+            `<button class="thumb-btn focus-ring shrink-0 flex flex-col items-center gap-1" aria-label="Page preview dekho">
+            <span class="w-12 h-12 rounded-lg overflow-hidden border-2 border-[var(--amber)] block"><img src="${m.rec.thumb}" class="w-full h-full object-cover"></span>
+            <span class="text-[10px] font-semibold text-[var(--amber-dark)]">dekho</span>
+          </button>`
+          : ""
+        }
+      `;
+          const thumbBtn = row.querySelector(".thumb-btn");
+          if (thumbBtn) {
+            thumbBtn.addEventListener("click", () => openModal(m.rec, q));
+          }
+          resultsList.appendChild(row);
+        });
+      }
+
+      let debounceTimer;
+      searchInput.addEventListener("input", () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(runSearch, 200);
+      });
+      fuzzyToggle.addEventListener("change", runSearch);
+
+      // ---------- Bulk EPIC check ----------
+      bulkRunBtn.addEventListener("click", () => {
+        const lines = bulkInput.value
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean);
+        bulkResults.innerHTML = "";
+        bulkCount.textContent =
+          lines.length ? `${lines.length} entries check ho rahe hain` : "";
+
+        lines.forEach((q) => {
+          const exactHit = pageRecords.find((rec) =>
+            rec.text.toLowerCase().includes(q.toLowerCase()),
+          );
+          let fuzzyHit = null;
+          if (!exactHit) {
+            for (const rec of pageRecords) {
+              const fz = fuzzyFindInText(rec.text, q);
+              if (fz.found) {
+                fuzzyHit = rec;
+                break;
+              }
+            }
+          }
+          const hit = exactHit || fuzzyHit;
+          const row = document.createElement("div");
+          row.className = `fade-in flex items-center justify-between gap-3 px-4 py-3 rounded-xl border ${hit ? "bulk-row-hit" : "bulk-row-miss"}`;
+          row.innerHTML = `
+        <span class="mono text-sm font-medium">${q}</span>
+        ${
+          hit ?
+            `<span class="text-xs font-semibold text-[var(--teal)] flex items-center gap-1.5"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg>Mil gaya · Page ${hit.page}${exactHit ? "" : " (fuzzy)"}</span>`
+          : `<span class="text-xs font-semibold text-[var(--red)] flex items-center gap-1.5"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>Nahi mila</span>`
+        }
+      `;
+          bulkResults.appendChild(row);
+        });
+      });
+
+      // ---------- Thumbnail modal ----------
+      const modalImgWrap = document.getElementById("modalImgWrap");
+
+      function openModal(rec, query) {
+        modalTitle.textContent =
+          query ?
+            `Page ${rec.page} · "${query}" yahan hai`
+          : `Page ${rec.page}`;
+        modalImg.src = rec.thumb;
+
+        // clear old highlight boxes
+        modalImgWrap
+          .querySelectorAll(".word-highlight")
+          .forEach((el) => el.remove());
+
+        thumbModal.classList.remove("hidden");
+        thumbModal.classList.add("flex");
+
+        if (!query || !rec.words || !rec.words.length) return;
+
+        const drawBoxes = () => {
+          const boxes = findMatchingWordBoxes(rec, query);
+          if (!boxes.length) return;
+          const dispW = modalImg.clientWidth;
+          const dispH = modalImg.clientHeight;
+          const scaleX = dispW / (rec.imgW || dispW);
+          const scaleY = dispH / (rec.imgH || dispH);
+          boxes.forEach((b) => {
+            const box = document.createElement("div");
+            box.className = "word-highlight";
+            box.style.left = b.x * scaleX - 3 + "px";
+            box.style.top = b.y * scaleY - 3 + "px";
+            box.style.width = b.w * scaleX + 6 + "px";
+            box.style.height = b.h * scaleY + 6 + "px";
+            modalImgWrap.appendChild(box);
+          });
+          // scroll first box into view
+          const first = modalImgWrap.querySelector(".word-highlight");
+          if (first)
+            first.scrollIntoView({ block: "center", inline: "center" });
+        };
+
+        if (modalImg.complete && modalImg.naturalWidth) {
+          drawBoxes();
+        } else {
+          modalImg.onload = drawBoxes;
+        }
+      }
+      function closeModal() {
+        thumbModal.classList.add("hidden");
+        thumbModal.classList.remove("flex");
+        modalImgWrap
+          .querySelectorAll(".word-highlight")
+          .forEach((el) => el.remove());
+      }
+      modalClose.addEventListener("click", closeModal);
+      thumbModal.addEventListener("click", (e) => {
+        if (e.target === thumbModal) closeModal();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeModal();
+      });
+    </script>
+  </body>
+</html>
 
